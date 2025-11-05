@@ -14,6 +14,7 @@ import tempfile
 import threading
 import uuid
 import time
+from flask_socketio import SocketIO
 # Try to import numpy, but don't fail if it's not available
 HAS_NUMPY = False
 np = None
@@ -28,6 +29,7 @@ except (ImportError, ModuleNotFoundError):
 from typing import List, Dict, Tuple
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here-change-in-production')
