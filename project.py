@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 from flask import Flask, request, render_template_string, jsonify, send_from_directory, send_file, session
 import os
 from werkzeug.utils import secure_filename
