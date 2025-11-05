@@ -5,5 +5,8 @@ reportlab==4.0.7
 Pillow>=11.0.0
 requests==2.31.0
 numpy==1.26.3
-
+Flask-SocketIO
+eventlet
+python-socketio
+python-engineio
 
