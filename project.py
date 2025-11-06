@@ -1562,7 +1562,6 @@ def generate_image_with_dalle(prompt_text, reference_image_path=None):
             model="gpt-image-1",
             prompt=prompt_text,
             size="1024x1024",
-            quality="standard",
             n=1,
         )
         
