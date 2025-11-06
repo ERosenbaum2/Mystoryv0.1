@@ -1559,9 +1559,10 @@ def generate_image_with_dalle(prompt_text, reference_image_path=None):
         
         # Use DALL-E 3 to generate image
         response = client.images.generate(
-            model="gpt-image-1",
+            model="dall-e-3",
             prompt=prompt_text,
             size="1024x1024",
+            quality="standard",
             n=1,
         )
         
