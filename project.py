@@ -2069,93 +2069,31 @@ If the child does not match the reference identity or the style changes:
                         print(f"⚠️  WARNING: Prompt exceeds 4000 characters! Will be truncated.")
                     print(f"{'='*60}\n")
                     
-                    # Generate image with retry logic if face doesn't match
-                    max_regeneration_attempts = 3
-                    image_generated = False
-                    temp_img_path = None
+                    # Generate image (no retry logic - generate once and accept)
+                    # IMPORTANT: Do NOT pass filepath for subsequent pages - only use FIRST illustration reference
+                    image_url = generate_image_with_dalle(enhanced_prompt, None)
+                    print(f"Image generated successfully, URL: {image_url[:50]}...")
                     
-                    for attempt in range(1, max_regeneration_attempts + 1):
-                        try:
-                            if attempt > 1:
-                                print(f"\n🔄 REGENERATION ATTEMPT {attempt}/{max_regeneration_attempts}")
-                                print(f"Reason: Face did not match FIRST illustration or style changed")
-                                # Add regeneration instruction prioritizing facial identity match
-                                # Story-specific regeneration instruction
-                                if story_choice == 'red':
-                                    outfit_ref = "SAME red cloak, SAME basket"
-                                elif story_choice == 'jack':
-                                    outfit_ref = "SAME clothing, SAME magic beans"
-                                else:
-                                    outfit_ref = "SAME clothing and items"
-                                
-                                regeneration_instruction = f"\n\nCRITICAL REGENERATION INSTRUCTION - PRIORITIZE FACIAL IDENTITY:\nThe face does NOT match the FIRST illustration. You MUST regenerate with the EXACT same child face from the FIRST illustration. Match the reference child's face EXACTLY — identical facial features, proportions, eyes, nose, mouth, cheeks, skin tone, hair color and length, and age. Do NOT alter, stylize, or reinterpret the child's face or age. SAME hairstyle, {outfit_ref}, SAME art style. Prioritize facial identity match before style variation."
-                                enhanced_prompt_with_retry = enhanced_prompt + regeneration_instruction
-                                enhanced_prompt_with_retry = truncate_prompt_for_dalle(enhanced_prompt_with_retry, max_length=4000)
-                            else:
-                                enhanced_prompt_with_retry = enhanced_prompt
-                            
-                            # IMPORTANT: Do NOT pass filepath for subsequent pages - only use FIRST illustration reference
-                            image_url = generate_image_with_dalle(enhanced_prompt_with_retry, None)
-                            print(f"Image generated successfully, URL: {image_url[:50]}...")
-                            
-                            # Download and save
-                            img = download_image_from_url(image_url)
-                            temp_img_path = os.path.join(tempfile.gettempdir(), f"storybook_img_{task_id}_{i}_attempt_{attempt}.png")
-                            img.save(temp_img_path)
-                            
-                            # Verify face matches FIRST generated illustration
-                            if master_reference_description:
-                                print(f"🔍 Quality check: Verifying face matches FIRST illustration and style consistency...")
-                                matches, feedback = verify_face_matches_master_reference(temp_img_path, master_reference_description)
-                                
-                                if matches:
-                                    print(f"✓ Quality check PASSED: Face matches FIRST illustration - {feedback}")
-                                    image_generated = True
-                                    break
-                                else:
-                                    print(f"❌ Quality check FAILED: Face/style does NOT match - {feedback}")
-                                    print(f"   Prioritizing facial identity match - will regenerate...")
-                                    if attempt < max_regeneration_attempts:
-                                        print(f"Will regenerate (attempt {attempt + 1}/{max_regeneration_attempts})...")
-                                        # Delete the non-matching image
-                                        try:
-                                            os.remove(temp_img_path)
-                                        except:
-                                            pass
-                                        temp_img_path = None
-                                    else:
-                                        print(f"⚠️  Max regeneration attempts reached. Using image despite mismatch.")
-                                        image_generated = True
-                                        break
-                            else:
-                                # No master reference to verify against, accept image
-                                print(f"⚠️  No master reference available for verification. Accepting image.")
-                                image_generated = True
-                                break
-                                
-                        except Exception as gen_error:
-                            print(f"ERROR: Failed to generate image {i+1} (attempt {attempt}): {gen_error}")
-                            if attempt == max_regeneration_attempts:
-                                raise  # Re-raise on final attempt
-                            print(f"Retrying...")
+                    # Download and save
+                    img = download_image_from_url(image_url)
+                    temp_img_path = os.path.join(tempfile.gettempdir(), f"storybook_img_{task_id}_{i}.png")
+                    img.save(temp_img_path)
                     
-                    if not image_generated or not temp_img_path:
-                        print(f"ERROR: Failed to generate acceptable image after {max_regeneration_attempts} attempts")
-                        raise Exception(f"Failed to generate image {i+1} after {max_regeneration_attempts} attempts")
-                    
-                    # Save the final accepted image
-                    final_img_path = os.path.join(tempfile.gettempdir(), f"storybook_img_{task_id}_{i}.png")
-                    if temp_img_path != final_img_path:
-                        import shutil
-                        shutil.copy2(temp_img_path, final_img_path)
-                        # Clean up attempt files
-                        try:
-                            os.remove(temp_img_path)
-                        except:
-                            pass
+                    # Optional quality check (informational only - no retry)
+                    if master_reference_description:
+                        print(f"🔍 Quality check: Verifying face matches FIRST illustration and style consistency...")
+                        matches, feedback = verify_face_matches_master_reference(temp_img_path, master_reference_description)
+                        
+                        if matches:
+                            print(f"✓ Quality check PASSED: Face matches FIRST illustration - {feedback}")
+                        else:
+                            print(f"⚠️  Quality check: Face/style may not match - {feedback}")
+                            print(f"   (Image accepted regardless - no regeneration)")
                     else:
-                        final_img_path = temp_img_path
+                        print(f"⚠️  No master reference available for verification.")
                     
+                    # Use the generated image directly (no need for separate final path)
+                    final_img_path = temp_img_path
                     generated_images.append(final_img_path)
                     temp_files.append(final_img_path)
                     print(f"✓ Successfully generated and saved image {i+1}/{total_pages}: {final_img_path}")
