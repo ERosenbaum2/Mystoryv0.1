@@ -1610,13 +1610,21 @@ def create_storybook_pdf(image_paths, text_data_list, output_path, story_title, 
     text_area_height = 1.5 * inch  # Text area at top
     image_height = 7 * inch  # Image area below text
     
+    print(f"Creating PDF canvas at: {output_path}")
     c = canvas.Canvas(output_path, pagesize=(page_width, page_height))
     
+    print(f"Processing {len(image_paths)} images for PDF...")
     for i, img_path in enumerate(image_paths):
         if i > 0:
             c.showPage()  # New page for each image after the first
         
         try:
+            # Verify image file exists
+            if not os.path.exists(img_path):
+                print(f"WARNING: Image file not found: {img_path}")
+                raise FileNotFoundError(f"Image file not found: {img_path}")
+            
+            print(f"Processing image {i+1}/{len(image_paths)}: {img_path}")
             # Get text for this page first
             narrative_text = ""
             if i < len(text_data_list) and text_data_list[i]:
@@ -1711,12 +1719,16 @@ def create_storybook_pdf(image_paths, text_data_list, output_path, story_title, 
                         c.drawString(text_x, text_y, line)
             
         except Exception as e:
-            print(f"Error adding image {i+1} to PDF: {str(e)}")
+            print(f"ERROR adding image {i+1} to PDF: {str(e)}")
+            import traceback
+            traceback.print_exc()
             # Add a placeholder if image fails
             c.setFont("Helvetica", 20)
             c.drawString(50, page_height / 2, f"Image {i+1} could not be loaded")
     
+    print(f"Saving PDF to: {output_path}")
     c.save()
+    print(f"✓ PDF saved successfully")
 
 @app.route('/')
 def index():
@@ -2192,12 +2204,59 @@ If the child does not match the reference identity or the style changes:
         # Create PDF
         generation_progress[task_id]['current_step'] = 'Creating PDF...'
         pdf_path = os.path.join(tempfile.gettempdir(), f"storybook_{task_id}.pdf")
-        create_storybook_pdf(generated_images, text_data_list, pdf_path, story_title, character_name)
-        generation_progress[task_id]['pdf_path'] = pdf_path
         
-        generation_progress[task_id]['status'] = 'complete'
-        generation_progress[task_id]['progress'] = len(all_prompts) + 1  # All pages generated (cover + 12 story pages)
-        generation_progress[task_id]['current_step'] = 'Storybook ready!'
+        print(f"\n{'='*60}")
+        print(f"Starting PDF creation...")
+        print(f"PDF path: {pdf_path}")
+        print(f"Number of images: {len(generated_images)}")
+        print(f"Number of text entries: {len(text_data_list)}")
+        
+        # Validate all image files exist before creating PDF
+        missing_images = []
+        for idx, img_path in enumerate(generated_images):
+            if not os.path.exists(img_path):
+                missing_images.append(f"Image {idx+1}: {img_path}")
+        
+        if missing_images:
+            error_msg = f"Missing image files: {', '.join(missing_images)}"
+            print(f"ERROR: {error_msg}")
+            generation_progress[task_id]['status'] = 'error'
+            generation_progress[task_id]['error'] = error_msg
+            return
+        
+        print(f"All {len(generated_images)} image files verified")
+        print(f"{'='*60}\n")
+        
+        try:
+            create_storybook_pdf(generated_images, text_data_list, pdf_path, story_title, character_name)
+            
+            # Verify PDF was created
+            if not os.path.exists(pdf_path):
+                raise Exception(f"PDF file was not created at {pdf_path}")
+            
+            pdf_size = os.path.getsize(pdf_path)
+            print(f"✓ PDF created successfully: {pdf_path} ({pdf_size} bytes)")
+            
+            generation_progress[task_id]['pdf_path'] = pdf_path
+            generation_progress[task_id]['status'] = 'complete'
+            generation_progress[task_id]['progress'] = len(all_prompts) + 1  # All pages generated (cover + 12 story pages)
+            generation_progress[task_id]['current_step'] = 'Storybook ready!'
+            
+            print(f"\n{'='*60}")
+            print(f"PDF generation complete! Status set to 'complete'")
+            print(f"{'='*60}\n")
+            
+        except Exception as pdf_error:
+            import traceback
+            print(f"\n{'!'*60}")
+            print(f"ERROR creating PDF: {str(pdf_error)}")
+            print(f"Error type: {type(pdf_error).__name__}")
+            print(f"Traceback:")
+            traceback.print_exc()
+            print(f"{'!'*60}\n")
+            generation_progress[task_id]['status'] = 'error'
+            generation_progress[task_id]['error'] = f'Failed to create PDF: {str(pdf_error)}'
+            return
         
     except Exception as e:
         print(f"Error in background generation: {str(e)}")
