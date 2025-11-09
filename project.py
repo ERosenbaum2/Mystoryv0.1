@@ -1724,11 +1724,14 @@ def index():
 
 def generate_storybook_background(task_id, filepath, gender, story_choice, character_name):
     """Background function to generate storybook with progress tracking."""
+    # TEST MODE: Set to True to only generate cover page for testing
+    TEST_MODE_SINGLE_PAGE = True  # Change to False to generate full storybook
+    
     try:
         generation_progress[task_id] = {
             'status': 'analyzing',
             'progress': 0,
-            'total': 13,  # Generating full storybook: 1 cover + 12 story pages
+            'total': 1 if TEST_MODE_SINGLE_PAGE else 13,  # Generating full storybook: 1 cover + 12 story pages (or just 1 for test mode)
             'current_step': 'Analyzing child\'s appearance...',
             'pdf_path': None,
             'error': None
@@ -1891,124 +1894,129 @@ This is the FIRST and MASTER REFERENCE illustration. All subsequent pages will m
         print(f"STEP 3: GENERATING ALL SUBSEQUENT PAGES USING MASTER REFERENCE")
         print(f"{'='*60}\n")
         
-        # Track previous page image for continuity (secondary reference)
-        previous_page_image_path = master_reference_image_path  # Start with master reference
-        previous_page_description = None  # Will store description of previous page
-        
-        # Iterate through remaining prompts (skip cover, start from index 1)
-        for i, prompt_info in enumerate(all_prompts[1:], start=1):
-            try:
-                print(f"\n>>> LOOP ITERATION {i+1}/{len(all_prompts)} STARTING <<<")
-                page_num = prompt_info['page_number']
-                generation_progress[task_id]['progress'] = i + 1
-                
-                if i == 0:
-                    generation_progress[task_id]['current_step'] = f'Generating cover page...'
-                else:
-                    generation_progress[task_id]['current_step'] = f'Generating page {page_num + 1}: {prompt_info["description"]}'
-                
-                # RAG: Retrieve relevant context from previous images for consistency
-                rag_consistency_info = ""
-                if i > 0 and context_store:
-                    # Use RAG to retrieve most relevant previous images
-                    query_text = f"{prompt_info['description']} {prompt_info['prompt'][:200]}"
-                    relevant_contexts = retrieve_relevant_context(query_text, context_store, top_k=3)
+        if TEST_MODE_SINGLE_PAGE:
+            print(f"\n{'!'*60}")
+            print(f"TEST MODE ENABLED: Only generating cover page (skipping story pages)")
+            print(f"{'!'*60}\n")
+        else:
+            # Track previous page image for continuity (secondary reference)
+            previous_page_image_path = master_reference_image_path  # Start with master reference
+            previous_page_description = None  # Will store description of previous page
+            
+            # Iterate through remaining prompts (skip cover, start from index 1)
+            for i, prompt_info in enumerate(all_prompts[1:], start=1):
+                try:
+                    print(f"\n>>> LOOP ITERATION {i+1}/{len(all_prompts)} STARTING <<<")
+                    page_num = prompt_info['page_number']
+                    generation_progress[task_id]['progress'] = i + 1
                     
-                    if relevant_contexts:
-                        print(f"RAG: Retrieved {len(relevant_contexts)} relevant context chunks from previous images")
-                        # Build consistency instructions from retrieved contexts
-                        rag_parts = []
-                        for idx, ctx in enumerate(relevant_contexts):
-                            if ctx.get('consistency_info'):
-                                info = ctx['consistency_info']
-                                # Extract character features (most important for consistency)
-                                if info.get('character_features'):
-                                    char_features = str(info['character_features'])[:200]  # Truncate
-                                    rag_parts.append(f"Character (match exactly): {char_features}")
-                                # Extract objects (basket contents, etc.)
-                                if info.get('objects'):
-                                    objects = str(info['objects'])[:150]  # Truncate
-                                    rag_parts.append(f"Objects (match exactly): {objects}")
-                                # Only take first 2 most relevant to keep prompt length manageable
-                                if len(rag_parts) >= 2:
-                                    break
-                        if rag_parts:
-                            rag_consistency_info = ". ".join(rag_parts)
-                            print(f"RAG consistency info retrieved ({len(rag_parts)} chunks): {rag_consistency_info[:150]}...")
-                
-                # Build enhanced prompt with appearance and object consistency
-                consistency_notes = []
-                
-                # Add object consistency notes based on story
-                if story_choice == 'red':
-                    if 'basket' in prompt_info['prompt'].lower():
-                        consistency_notes.append(f"The basket must contain: {', '.join(story_objects['basket_contents'])}. This is consistent across all pages.")
-                    if 'red' in prompt_info['prompt'].lower() or 'cape' in prompt_info['prompt'].lower():
-                        consistency_notes.append(f"The child wears a {story_objects['red_cape']} in every scene where they appear.")
-                
-                elif story_choice == 'jack':
-                    if 'beanstalk' in prompt_info['prompt'].lower():
-                        consistency_notes.append(f"The beanstalk is an {story_objects['beanstalk']} with giant green leaves and magical sparkles.")
-                    if 'treasure' in prompt_info['prompt'].lower() or 'gold' in prompt_info['prompt'].lower():
-                        consistency_notes.append(f"The treasure is a {story_objects['treasure']} - maintain this exact appearance.")
-                    if 'beans' in prompt_info['prompt'].lower():
-                        consistency_notes.append(f"The magic beans are {story_objects['magic_beans']} - keep them consistent.")
-                
-                # Combine RAG info with story-based consistency
-                consistency_text = " ".join(consistency_notes)
-                if rag_consistency_info:
-                    consistency_text = f"{consistency_text} {rag_consistency_info}" if consistency_text else rag_consistency_info
-                
-                # Build the enhanced prompt
-                base_prompt = prompt_info['prompt']
-                if 'watercolor' not in base_prompt.lower() and 'painterly' not in base_prompt.lower():
-                    base_prompt = f"Create a children's book illustration page in a watercolor/painterly style with a soft, artistic feel that is gentle and emotional. {base_prompt}"
-                
-                # For subsequent pages: Use MASTER REFERENCE description
-                # Generate comprehensive consistency rules using master reference
-                character_rules = generate_character_consistency_rules(child_appearance, story_choice, is_cover=False)
-                
-                # Add MASTER REFERENCE description (CRITICAL for consistency)
-                if master_reference_description:
-                    master_ref_short = master_reference_description[:400] if len(master_reference_description) > 400 else master_reference_description
-                    character_rules += f"\n\n{'='*80}\nMASTER REFERENCE CHARACTER DETAILS (MUST MATCH EXACTLY):\n{master_ref_short}\n{'='*80}"
-                
-                # Generate style rules using master reference style
-                style_rules = generate_style_consistency_rules(is_cover=False, style_description=style_description)
-                
-                # Combine all consistency information
-                # Truncate RAG consistency text if too long
-                rag_consistency_text = ""
-                if rag_consistency_info:
-                    rag_consistency_text = f"\n\nRAG-RETRIEVED CONSISTENCY (from previous pages):\n{rag_consistency_info[:300]}" if len(rag_consistency_info) > 300 else f"\n\nRAG-RETRIEVED CONSISTENCY (from previous pages):\n{rag_consistency_info}"
-                
-                # Truncate story-based consistency notes if too long
-                story_consistency_text = consistency_text[:150] if consistency_text and len(consistency_text) > 150 else (consistency_text if consistency_text else "")
-                
-                # Extract previous page description for continuity (secondary reference)
-                previous_page_continuity = ""
-                if previous_page_image_path and previous_page_image_path != master_reference_image_path:
-                    try:
-                        previous_page_desc = analyze_child_face_from_illustration(previous_page_image_path)
-                        if previous_page_desc:
-                            previous_page_continuity = f"\nPREVIOUS PAGE REFERENCE: Also match the style and facial identity from the previous page. {previous_page_desc[:200]}"
-                            print(f"✓ Extracted previous page description for continuity")
-                    except Exception as e:
-                        print(f"⚠️  Warning: Could not extract previous page description: {e}")
-                
-                # Build story-specific consistency lock text
-                if story_choice == 'red':
-                    outfit_consistency_lock = "SAME red cloak, SAME basket"
-                    outfit_rules = "- Same red hood and cloak every page.\n- Same basket every page."
-                elif story_choice == 'jack':
-                    outfit_consistency_lock = "SAME clothing, SAME magic beans and treasure items"
-                    outfit_rules = "- Same clothing style every page.\n- Same magic beans appearance every page.\n- Same treasure items (golden egg/coins) appearance every page."
-                else:
-                    outfit_consistency_lock = "SAME clothing and items"
-                    outfit_rules = "- Same clothing style every page.\n- Same story items every page."
-                
-                # Build the comprehensive prompt with EXACT consistency lock text from user requirements
-                enhanced_prompt = f"""{base_prompt}
+                    if i == 0:
+                        generation_progress[task_id]['current_step'] = f'Generating cover page...'
+                    else:
+                        generation_progress[task_id]['current_step'] = f'Generating page {page_num + 1}: {prompt_info["description"]}'
+                    
+                    # RAG: Retrieve relevant context from previous images for consistency
+                    rag_consistency_info = ""
+                    if i > 0 and context_store:
+                        # Use RAG to retrieve most relevant previous images
+                        query_text = f"{prompt_info['description']} {prompt_info['prompt'][:200]}"
+                        relevant_contexts = retrieve_relevant_context(query_text, context_store, top_k=3)
+                        
+                        if relevant_contexts:
+                            print(f"RAG: Retrieved {len(relevant_contexts)} relevant context chunks from previous images")
+                            # Build consistency instructions from retrieved contexts
+                            rag_parts = []
+                            for idx, ctx in enumerate(relevant_contexts):
+                                if ctx.get('consistency_info'):
+                                    info = ctx['consistency_info']
+                                    # Extract character features (most important for consistency)
+                                    if info.get('character_features'):
+                                        char_features = str(info['character_features'])[:200]  # Truncate
+                                        rag_parts.append(f"Character (match exactly): {char_features}")
+                                    # Extract objects (basket contents, etc.)
+                                    if info.get('objects'):
+                                        objects = str(info['objects'])[:150]  # Truncate
+                                        rag_parts.append(f"Objects (match exactly): {objects}")
+                                    # Only take first 2 most relevant to keep prompt length manageable
+                                    if len(rag_parts) >= 2:
+                                        break
+                            if rag_parts:
+                                rag_consistency_info = ". ".join(rag_parts)
+                                print(f"RAG consistency info retrieved ({len(rag_parts)} chunks): {rag_consistency_info[:150]}...")
+                    
+                    # Build enhanced prompt with appearance and object consistency
+                    consistency_notes = []
+                    
+                    # Add object consistency notes based on story
+                    if story_choice == 'red':
+                        if 'basket' in prompt_info['prompt'].lower():
+                            consistency_notes.append(f"The basket must contain: {', '.join(story_objects['basket_contents'])}. This is consistent across all pages.")
+                        if 'red' in prompt_info['prompt'].lower() or 'cape' in prompt_info['prompt'].lower():
+                            consistency_notes.append(f"The child wears a {story_objects['red_cape']} in every scene where they appear.")
+                    
+                    elif story_choice == 'jack':
+                        if 'beanstalk' in prompt_info['prompt'].lower():
+                            consistency_notes.append(f"The beanstalk is an {story_objects['beanstalk']} with giant green leaves and magical sparkles.")
+                        if 'treasure' in prompt_info['prompt'].lower() or 'gold' in prompt_info['prompt'].lower():
+                            consistency_notes.append(f"The treasure is a {story_objects['treasure']} - maintain this exact appearance.")
+                        if 'beans' in prompt_info['prompt'].lower():
+                            consistency_notes.append(f"The magic beans are {story_objects['magic_beans']} - keep them consistent.")
+                    
+                    # Combine RAG info with story-based consistency
+                    consistency_text = " ".join(consistency_notes)
+                    if rag_consistency_info:
+                        consistency_text = f"{consistency_text} {rag_consistency_info}" if consistency_text else rag_consistency_info
+                    
+                    # Build the enhanced prompt
+                    base_prompt = prompt_info['prompt']
+                    if 'watercolor' not in base_prompt.lower() and 'painterly' not in base_prompt.lower():
+                        base_prompt = f"Create a children's book illustration page in a watercolor/painterly style with a soft, artistic feel that is gentle and emotional. {base_prompt}"
+                    
+                    # For subsequent pages: Use MASTER REFERENCE description
+                    # Generate comprehensive consistency rules using master reference
+                    character_rules = generate_character_consistency_rules(child_appearance, story_choice, is_cover=False)
+                    
+                    # Add MASTER REFERENCE description (CRITICAL for consistency)
+                    if master_reference_description:
+                        master_ref_short = master_reference_description[:400] if len(master_reference_description) > 400 else master_reference_description
+                        character_rules += f"\n\n{'='*80}\nMASTER REFERENCE CHARACTER DETAILS (MUST MATCH EXACTLY):\n{master_ref_short}\n{'='*80}"
+                    
+                    # Generate style rules using master reference style
+                    style_rules = generate_style_consistency_rules(is_cover=False, style_description=style_description)
+                    
+                    # Combine all consistency information
+                    # Truncate RAG consistency text if too long
+                    rag_consistency_text = ""
+                    if rag_consistency_info:
+                        rag_consistency_text = f"\n\nRAG-RETRIEVED CONSISTENCY (from previous pages):\n{rag_consistency_info[:300]}" if len(rag_consistency_info) > 300 else f"\n\nRAG-RETRIEVED CONSISTENCY (from previous pages):\n{rag_consistency_info}"
+                    
+                    # Truncate story-based consistency notes if too long
+                    story_consistency_text = consistency_text[:150] if consistency_text and len(consistency_text) > 150 else (consistency_text if consistency_text else "")
+                    
+                    # Extract previous page description for continuity (secondary reference)
+                    previous_page_continuity = ""
+                    if previous_page_image_path and previous_page_image_path != master_reference_image_path:
+                        try:
+                            previous_page_desc = analyze_child_face_from_illustration(previous_page_image_path)
+                            if previous_page_desc:
+                                previous_page_continuity = f"\nPREVIOUS PAGE REFERENCE: Also match the style and facial identity from the previous page. {previous_page_desc[:200]}"
+                                print(f"✓ Extracted previous page description for continuity")
+                        except Exception as e:
+                            print(f"⚠️  Warning: Could not extract previous page description: {e}")
+                    
+                    # Build story-specific consistency lock text
+                    if story_choice == 'red':
+                        outfit_consistency_lock = "SAME red cloak, SAME basket"
+                        outfit_rules = "- Same red hood and cloak every page.\n- Same basket every page."
+                    elif story_choice == 'jack':
+                        outfit_consistency_lock = "SAME clothing, SAME magic beans and treasure items"
+                        outfit_rules = "- Same clothing style every page.\n- Same magic beans appearance every page.\n- Same treasure items (golden egg/coins) appearance every page."
+                    else:
+                        outfit_consistency_lock = "SAME clothing and items"
+                        outfit_rules = "- Same clothing style every page.\n- Same story items every page."
+                    
+                    # Build the comprehensive prompt with EXACT consistency lock text from user requirements
+                    enhanced_prompt = f"""{base_prompt}
 
 ================================================================================
 CONSISTENCY LOCK - MANDATORY FOR ALL PAGES AFTER THE FIRST:
@@ -2049,184 +2057,184 @@ If the child does not match the reference identity or the style changes:
 - Regenerate up to 3 times if needed
 - The child MUST look EXACTLY like the FIRST illustration in EVERY image.
 ================================================================================"""
-                
-                # Generate image with verification and regeneration logic
-                total_pages = len(all_prompts)
-                prompt_length = len(enhanced_prompt)
-                print(f"\n{'='*60}")
-                print(f"Generating image {i+1}/{total_pages}: Story page {page_num}")
-                print(f"Page description: {prompt_info['description']}")
-                print(f"Prompt length: {prompt_length} characters (max: 4000)")
-                if prompt_length > 4000:
-                    print(f"⚠️  WARNING: Prompt exceeds 4000 characters! Will be truncated.")
-                print(f"{'='*60}\n")
-                
-                # Generate image with retry logic if face doesn't match
-                max_regeneration_attempts = 3
-                image_generated = False
-                temp_img_path = None
-                
-                for attempt in range(1, max_regeneration_attempts + 1):
-                    try:
-                        if attempt > 1:
-                            print(f"\n🔄 REGENERATION ATTEMPT {attempt}/{max_regeneration_attempts}")
-                            print(f"Reason: Face did not match FIRST illustration or style changed")
-                            # Add regeneration instruction prioritizing facial identity match
-                            # Story-specific regeneration instruction
-                            if story_choice == 'red':
-                                outfit_ref = "SAME red cloak, SAME basket"
-                            elif story_choice == 'jack':
-                                outfit_ref = "SAME clothing, SAME magic beans"
-                            else:
-                                outfit_ref = "SAME clothing and items"
-                            
-                            regeneration_instruction = f"\n\nCRITICAL REGENERATION INSTRUCTION - PRIORITIZE FACIAL IDENTITY:\nThe face does NOT match the FIRST illustration. You MUST regenerate with the EXACT same child face from the FIRST illustration. Match the reference child's face EXACTLY — identical facial features, proportions, eyes, nose, mouth, cheeks, skin tone, hair color and length, and age. Do NOT alter, stylize, or reinterpret the child's face or age. SAME hairstyle, {outfit_ref}, SAME art style. Prioritize facial identity match before style variation."
-                            enhanced_prompt_with_retry = enhanced_prompt + regeneration_instruction
-                            enhanced_prompt_with_retry = truncate_prompt_for_dalle(enhanced_prompt_with_retry, max_length=4000)
-                        else:
-                            enhanced_prompt_with_retry = enhanced_prompt
-                        
-                        # IMPORTANT: Do NOT pass filepath for subsequent pages - only use FIRST illustration reference
-                        image_url = generate_image_with_dalle(enhanced_prompt_with_retry, None)
-                        print(f"Image generated successfully, URL: {image_url[:50]}...")
-                        
-                        # Download and save
-                        img = download_image_from_url(image_url)
-                        temp_img_path = os.path.join(tempfile.gettempdir(), f"storybook_img_{task_id}_{i}_attempt_{attempt}.png")
-                        img.save(temp_img_path)
-                        
-                        # Verify face matches FIRST generated illustration
-                        if master_reference_description:
-                            print(f"🔍 Quality check: Verifying face matches FIRST illustration and style consistency...")
-                            matches, feedback = verify_face_matches_master_reference(temp_img_path, master_reference_description)
-                            
-                            if matches:
-                                print(f"✓ Quality check PASSED: Face matches FIRST illustration - {feedback}")
-                                image_generated = True
-                                break
-                            else:
-                                print(f"❌ Quality check FAILED: Face/style does NOT match - {feedback}")
-                                print(f"   Prioritizing facial identity match - will regenerate...")
-                                if attempt < max_regeneration_attempts:
-                                    print(f"Will regenerate (attempt {attempt + 1}/{max_regeneration_attempts})...")
-                                    # Delete the non-matching image
-                                    try:
-                                        os.remove(temp_img_path)
-                                    except:
-                                        pass
-                                    temp_img_path = None
+                    
+                    # Generate image with verification and regeneration logic
+                    total_pages = len(all_prompts)
+                    prompt_length = len(enhanced_prompt)
+                    print(f"\n{'='*60}")
+                    print(f"Generating image {i+1}/{total_pages}: Story page {page_num}")
+                    print(f"Page description: {prompt_info['description']}")
+                    print(f"Prompt length: {prompt_length} characters (max: 4000)")
+                    if prompt_length > 4000:
+                        print(f"⚠️  WARNING: Prompt exceeds 4000 characters! Will be truncated.")
+                    print(f"{'='*60}\n")
+                    
+                    # Generate image with retry logic if face doesn't match
+                    max_regeneration_attempts = 3
+                    image_generated = False
+                    temp_img_path = None
+                    
+                    for attempt in range(1, max_regeneration_attempts + 1):
+                        try:
+                            if attempt > 1:
+                                print(f"\n🔄 REGENERATION ATTEMPT {attempt}/{max_regeneration_attempts}")
+                                print(f"Reason: Face did not match FIRST illustration or style changed")
+                                # Add regeneration instruction prioritizing facial identity match
+                                # Story-specific regeneration instruction
+                                if story_choice == 'red':
+                                    outfit_ref = "SAME red cloak, SAME basket"
+                                elif story_choice == 'jack':
+                                    outfit_ref = "SAME clothing, SAME magic beans"
                                 else:
-                                    print(f"⚠️  Max regeneration attempts reached. Using image despite mismatch.")
+                                    outfit_ref = "SAME clothing and items"
+                                
+                                regeneration_instruction = f"\n\nCRITICAL REGENERATION INSTRUCTION - PRIORITIZE FACIAL IDENTITY:\nThe face does NOT match the FIRST illustration. You MUST regenerate with the EXACT same child face from the FIRST illustration. Match the reference child's face EXACTLY — identical facial features, proportions, eyes, nose, mouth, cheeks, skin tone, hair color and length, and age. Do NOT alter, stylize, or reinterpret the child's face or age. SAME hairstyle, {outfit_ref}, SAME art style. Prioritize facial identity match before style variation."
+                                enhanced_prompt_with_retry = enhanced_prompt + regeneration_instruction
+                                enhanced_prompt_with_retry = truncate_prompt_for_dalle(enhanced_prompt_with_retry, max_length=4000)
+                            else:
+                                enhanced_prompt_with_retry = enhanced_prompt
+                            
+                            # IMPORTANT: Do NOT pass filepath for subsequent pages - only use FIRST illustration reference
+                            image_url = generate_image_with_dalle(enhanced_prompt_with_retry, None)
+                            print(f"Image generated successfully, URL: {image_url[:50]}...")
+                            
+                            # Download and save
+                            img = download_image_from_url(image_url)
+                            temp_img_path = os.path.join(tempfile.gettempdir(), f"storybook_img_{task_id}_{i}_attempt_{attempt}.png")
+                            img.save(temp_img_path)
+                            
+                            # Verify face matches FIRST generated illustration
+                            if master_reference_description:
+                                print(f"🔍 Quality check: Verifying face matches FIRST illustration and style consistency...")
+                                matches, feedback = verify_face_matches_master_reference(temp_img_path, master_reference_description)
+                                
+                                if matches:
+                                    print(f"✓ Quality check PASSED: Face matches FIRST illustration - {feedback}")
                                     image_generated = True
                                     break
-                        else:
-                            # No master reference to verify against, accept image
-                            print(f"⚠️  No master reference available for verification. Accepting image.")
-                            image_generated = True
-                            break
-                            
-                    except Exception as gen_error:
-                        print(f"ERROR: Failed to generate image {i+1} (attempt {attempt}): {gen_error}")
-                        if attempt == max_regeneration_attempts:
-                            raise  # Re-raise on final attempt
-                        print(f"Retrying...")
-                
-                if not image_generated or not temp_img_path:
-                    print(f"ERROR: Failed to generate acceptable image after {max_regeneration_attempts} attempts")
-                    raise Exception(f"Failed to generate image {i+1} after {max_regeneration_attempts} attempts")
-                
-                # Save the final accepted image
-                final_img_path = os.path.join(tempfile.gettempdir(), f"storybook_img_{task_id}_{i}.png")
-                if temp_img_path != final_img_path:
-                    import shutil
-                    shutil.copy2(temp_img_path, final_img_path)
-                    # Clean up attempt files
-                    try:
-                        os.remove(temp_img_path)
-                    except:
-                        pass
-                else:
-                    final_img_path = temp_img_path
-                
-                generated_images.append(final_img_path)
-                temp_files.append(final_img_path)
-                print(f"✓ Successfully generated and saved image {i+1}/{total_pages}: {final_img_path}")
-                
-                # Update previous page reference for next iteration (for continuity - secondary reference)
-                previous_page_image_path = final_img_path
-                
-                # RAG: Extract and store consistency information from this generated image
-                try:
-                    print(f"RAG: Extracting consistency information from page {i+1}...")
-                    consistency_info = extract_consistency_info_from_image(
-                        final_img_path, 
-                        prompt_info['description'], 
-                        story_choice
-                    )
+                                else:
+                                    print(f"❌ Quality check FAILED: Face/style does NOT match - {feedback}")
+                                    print(f"   Prioritizing facial identity match - will regenerate...")
+                                    if attempt < max_regeneration_attempts:
+                                        print(f"Will regenerate (attempt {attempt + 1}/{max_regeneration_attempts})...")
+                                        # Delete the non-matching image
+                                        try:
+                                            os.remove(temp_img_path)
+                                        except:
+                                            pass
+                                        temp_img_path = None
+                                    else:
+                                        print(f"⚠️  Max regeneration attempts reached. Using image despite mismatch.")
+                                        image_generated = True
+                                        break
+                            else:
+                                # No master reference to verify against, accept image
+                                print(f"⚠️  No master reference available for verification. Accepting image.")
+                                image_generated = True
+                                break
+                                
+                        except Exception as gen_error:
+                            print(f"ERROR: Failed to generate image {i+1} (attempt {attempt}): {gen_error}")
+                            if attempt == max_regeneration_attempts:
+                                raise  # Re-raise on final attempt
+                            print(f"Retrying...")
                     
-                    if consistency_info:
-                        # Create embedding for this image's context
-                        context_text = f"{prompt_info['description']} {prompt_info['prompt'][:200]}"
-                        if consistency_info.get('character_features'):
-                            context_text += f" {consistency_info['character_features']}"
-                        if consistency_info.get('objects'):
-                            context_text += f" {consistency_info['objects']}"
-                        
-                        embedding = create_embedding(context_text)
-                        
-                        # Store in context store for RAG retrieval
-                        context_store.append({
-                            'consistency_info': consistency_info,
-                            'embedding': embedding,
-                            'page_description': prompt_info['description'],
-                            'page_number': i + 1,
-                            'context_text': context_text
-                        })
-                        print(f"RAG: Stored consistency info for page {i+1} in context store (total: {len(context_store)} items)")
+                    if not image_generated or not temp_img_path:
+                        print(f"ERROR: Failed to generate acceptable image after {max_regeneration_attempts} attempts")
+                        raise Exception(f"Failed to generate image {i+1} after {max_regeneration_attempts} attempts")
+                    
+                    # Save the final accepted image
+                    final_img_path = os.path.join(tempfile.gettempdir(), f"storybook_img_{task_id}_{i}.png")
+                    if temp_img_path != final_img_path:
+                        import shutil
+                        shutil.copy2(temp_img_path, final_img_path)
+                        # Clean up attempt files
+                        try:
+                            os.remove(temp_img_path)
+                        except:
+                            pass
                     else:
-                        print(f"RAG: Warning - Could not extract consistency info from page {i+1}")
-                except Exception as rag_error:
-                    print(f"RAG: Warning - Error extracting/storing consistency info: {rag_error}. Continuing...")
-                
-                # For subsequent pages, we already have master reference, so no need for additional analysis
-                # The master reference is the canonical source of truth for all pages
-                # (Optional: Track latest face for logging purposes, but master reference takes precedence)
-                try:
-                    generation_progress[task_id]['current_step'] = f'Page {i+1} completed and verified against master reference'
-                    # Optional: Log face analysis for monitoring (but master reference is the source of truth)
-                    latest_face_description = analyze_child_face_from_illustration(final_img_path)
-                    if latest_face_description:
-                        print(f"Face description from page {i+1}: {latest_face_description[:100]}...")
-                        print(f"(Master reference description is used for all subsequent pages)")
-                except Exception as analysis_error:
-                    print(f"Warning: Error in optional analysis step: {analysis_error}. Continuing...")
-                    # Continue anyway - master reference is the source of truth
-                
-                # Generate text for this page
-                try:
-                    text_data = generate_page_text(prompt_info, story_choice, page_num + 1, len(all_prompts), character_name)
-                    text_data_list.append(text_data)
-                except Exception as text_error:
-                    print(f"Warning: Error generating text for page {i+1}: {text_error}")
+                        final_img_path = temp_img_path
+                    
+                    generated_images.append(final_img_path)
+                    temp_files.append(final_img_path)
+                    print(f"✓ Successfully generated and saved image {i+1}/{total_pages}: {final_img_path}")
+                    
+                    # Update previous page reference for next iteration (for continuity - secondary reference)
+                    previous_page_image_path = final_img_path
+                    
+                    # RAG: Extract and store consistency information from this generated image
+                    try:
+                        print(f"RAG: Extracting consistency information from page {i+1}...")
+                        consistency_info = extract_consistency_info_from_image(
+                            final_img_path, 
+                            prompt_info['description'], 
+                            story_choice
+                        )
+                        
+                        if consistency_info:
+                            # Create embedding for this image's context
+                            context_text = f"{prompt_info['description']} {prompt_info['prompt'][:200]}"
+                            if consistency_info.get('character_features'):
+                                context_text += f" {consistency_info['character_features']}"
+                            if consistency_info.get('objects'):
+                                context_text += f" {consistency_info['objects']}"
+                            
+                            embedding = create_embedding(context_text)
+                            
+                            # Store in context store for RAG retrieval
+                            context_store.append({
+                                'consistency_info': consistency_info,
+                                'embedding': embedding,
+                                'page_description': prompt_info['description'],
+                                'page_number': i + 1,
+                                'context_text': context_text
+                            })
+                            print(f"RAG: Stored consistency info for page {i+1} in context store (total: {len(context_store)} items)")
+                        else:
+                            print(f"RAG: Warning - Could not extract consistency info from page {i+1}")
+                    except Exception as rag_error:
+                        print(f"RAG: Warning - Error extracting/storing consistency info: {rag_error}. Continuing...")
+                    
+                    # For subsequent pages, we already have master reference, so no need for additional analysis
+                    # The master reference is the canonical source of truth for all pages
+                    # (Optional: Track latest face for logging purposes, but master reference takes precedence)
+                    try:
+                        generation_progress[task_id]['current_step'] = f'Page {i+1} completed and verified against master reference'
+                        # Optional: Log face analysis for monitoring (but master reference is the source of truth)
+                        latest_face_description = analyze_child_face_from_illustration(final_img_path)
+                        if latest_face_description:
+                            print(f"Face description from page {i+1}: {latest_face_description[:100]}...")
+                            print(f"(Master reference description is used for all subsequent pages)")
+                    except Exception as analysis_error:
+                        print(f"Warning: Error in optional analysis step: {analysis_error}. Continuing...")
+                        # Continue anyway - master reference is the source of truth
+                    
+                    # Generate text for this page
+                    try:
+                        text_data = generate_page_text(prompt_info, story_choice, page_num + 1, len(all_prompts), character_name)
+                        text_data_list.append(text_data)
+                    except Exception as text_error:
+                        print(f"Warning: Error generating text for page {i+1}: {text_error}")
+                        text_data_list.append({"narrative": []})
+                    
+                    # Continue generating all pages (no break - generating full storybook)
+                    total_pages = len(all_prompts)
+                    print(f"Completed image {i+1}/{total_pages}. Total images so far: {len(generated_images)}")
+                    print(f"Moving to next image... (loop will continue)")
+                    
+                except Exception as e:
+                    import traceback
+                    print(f"\n{'!'*60}")
+                    print(f"ERROR generating page {i+1}/{len(all_prompts)}: {str(e)}")
+                    print(f"Error type: {type(e).__name__}")
+                    print(f"Traceback:")
+                    traceback.print_exc()
+                    print(f"{'!'*60}\n")
+                    # Still add empty text data and continue to next page
                     text_data_list.append({"narrative": []})
-                
-                # Continue generating all pages (no break - generating full storybook)
-                total_pages = len(all_prompts)
-                print(f"Completed image {i+1}/{total_pages}. Total images so far: {len(generated_images)}")
-                print(f"Moving to next image... (loop will continue)")
-                
-            except Exception as e:
-                import traceback
-                print(f"\n{'!'*60}")
-                print(f"ERROR generating page {i+1}/{len(all_prompts)}: {str(e)}")
-                print(f"Error type: {type(e).__name__}")
-                print(f"Traceback:")
-                traceback.print_exc()
-                print(f"{'!'*60}\n")
-                # Still add empty text data and continue to next page
-                text_data_list.append({"narrative": []})
-                # Continue to next image instead of stopping
-                continue
+                    # Continue to next image instead of stopping
+                    continue
         
         # Summary
         print(f"\n{'#'*60}")
