@@ -1725,7 +1725,7 @@ def index():
 def generate_storybook_background(task_id, filepath, gender, story_choice, character_name):
     """Background function to generate storybook with progress tracking."""
     # TEST MODE: Set to True to only generate cover page for testing
-    TEST_MODE_SINGLE_PAGE = True  # Change to False to generate full storybook
+    TEST_MODE_SINGLE_PAGE = False  # Change to False to generate full storybook
     
     try:
         generation_progress[task_id] = {
