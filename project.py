@@ -1625,6 +1625,10 @@ def create_storybook_pdf(image_paths, text_data_list, output_path, story_title, 
                 raise FileNotFoundError(f"Image file not found: {img_path}")
             
             print(f"Processing image {i+1}/{len(image_paths)}: {img_path}")
+            
+            # Yield control to eventlet periodically to prevent blocking
+            eventlet.sleep(0)
+            
             # Get text for this page first
             narrative_text = ""
             if i < len(text_data_list) and text_data_list[i]:
@@ -1646,7 +1650,12 @@ def create_storybook_pdf(image_paths, text_data_list, output_path, story_title, 
                 narrative_text = " ".join(narrative_list)
             
             # Draw image first (full page)
+            # Note: drawImage can be slow with large images, but we yield after
             c.drawImage(img_path, 0, 0, width=page_width, height=page_height, preserveAspectRatio=False)
+            
+            # Yield after drawing image (this is a potentially slow operation)
+            # This allows eventlet to handle other requests during PDF creation
+            eventlet.sleep(0.01)  # Small delay to ensure eventlet can process other requests
             
             # For cover page (i=0), draw title with character name
             if i == 0:
@@ -1718,6 +1727,9 @@ def create_storybook_pdf(image_paths, text_data_list, output_path, story_title, 
                         text_y = text_y_start - (j * line_height)
                         c.drawString(text_x, text_y, line)
             
+            # Yield after processing each page to allow eventlet to handle requests
+            eventlet.sleep(0.01)
+            
         except Exception as e:
             print(f"ERROR adding image {i+1} to PDF: {str(e)}")
             import traceback
@@ -1727,7 +1739,11 @@ def create_storybook_pdf(image_paths, text_data_list, output_path, story_title, 
             c.drawString(50, page_height / 2, f"Image {i+1} could not be loaded")
     
     print(f"Saving PDF to: {output_path}")
+    # Yield before final save operation
+    eventlet.sleep(0)
     c.save()
+    # Yield after save to ensure it completes
+    eventlet.sleep(0)
     print(f"✓ PDF saved successfully")
 
 @app.route('/')
@@ -2307,6 +2323,9 @@ def generate_story():
 @app.route('/progress/<task_id>', methods=['GET'])
 def get_progress(task_id):
     """Get progress for a generation task."""
+    # Yield to eventlet to prevent blocking
+    eventlet.sleep(0)
+    
     if task_id not in generation_progress:
         return jsonify({'error': 'Task not found'}), 404
     
